@@ -159,9 +159,7 @@ if __name__ == '__main__':
 	import sys
 	import pickle
 
-	contentLossExist = True
-	# styleImage = sys.argv[2]
-	# resultsIndex = sys.argv[3]
+	contentLossExist = True # whether to include content loss
 
 	contentLayerNames = ['relu4_2']
 	styleLayerNames = ['relu4_1', 'relu5_1','relu1_1', 'relu2_1', 'relu3_1']

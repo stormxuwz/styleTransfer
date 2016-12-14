@@ -1,202 +1,196 @@
-# using 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"]=""  # comment out to use GPU
+os.environ["CUDA_VISIBLE_DEVICES"]="" #comment this line to use GPU
 import tensorflow as tf
 import pickle
 import scipy.misc
 import numpy as np
-# slim = tf.contrib.slim
-# modelList = ["vgg_19","vgg_16","inception4","resnet_v1_152","inception_resnet_v2"]
 from tensorflow.python.platform import gfile
 
+
 def content(layer):
+	# layer is a tensor represent the feature map
 	return layer
 
 def style(layer, size):
-	# return layer
-	print map(lambda i: i.value, layer.get_shape())
+	# layer is a tensor represent the feature map
+	# size is the size of each feature map
 	_, height, width, number = map(lambda i: i.value, layer.get_shape())
-	# if size is None:
-	size2 = height * width * number
-	# else:
-		# size = size[1]*size[2]*size[3]
+	if size is None:
+		size = height * width * number
+	else:
+		size = size[1]*size[2]*size[3]
 	feats = tf.reshape(layer, (-1, number))
-	gram = tf.matmul(tf.transpose(feats), feats)/size2  # gram is a matrix
-	print gram
+	gram = tf.matmul(tf.transpose(feats), feats)/size  # gram is a matrix
 	return gram
 
 def getFeatureTensors(layerNames, featureType = "content", size = None):
-	# contentImage has been normalized
+	# layerNames: layer names
+	# featureType: get content representation or style representation
+	# size of each layer, necessary if the graph can't infer by itself
 	features = {}
 	for layerName in layerNames:
 		layer = tf.get_default_graph().get_tensor_by_name(layerName)
 		if featureType == "content":
 			tensor = content(layer)
 		elif featureType == "style":
-			if size is not None:
-				tensor = style(layer,size[layerName])
-			else:
-				tensor = style(layer, None)
+			tensor = style(layer,size[layerName])
 		features[layerName] = tensor
+	
 	return features
 
 
-def stylize(contentImage, styleImage, contentLayerNames, styleLayerNames,learning_rate):
-	image_size = (299,299,3)
-	# inputImage = tf.get_default_graph().get_tensor_by_name("ResizeBilinear:0")
-
-	# preprocessing images
-	contentImage = scipy.misc.imresize(contentImage, image_size).astype(np.float32)
-	styleImage = scipy.misc.imresize(styleImage, image_size).astype(np.float32)
-	
-	scipy.misc.imsave("./contentImage.jpg", contentImage)
-	scipy.misc.imsave("./styleImage.jpg", styleImage)
-
-
-	# mean_pix = np.mean(contentImage,axis = (0,1))
-	# std_pix = np.std(contentImage, axis = (0,1))
-	# mean_pix = 0
-	# mean_pix = np.mean(contentImage,axis = (0,1))
-	mean_pix = np.array([ 104.00698793,  116.66876762,  122.67891434])
-	std_pix = 1
-
-	contentImage = (contentImage - mean_pix)/std_pix
-	styleImage = (styleImage - mean_pix)/std_pix
-
-
-	contentImage = np.expand_dims(contentImage.astype(np.float32), axis = 0)
-	styleImage = np.expand_dims(styleImage.astype(np.float32), axis = 0)
-
+def stylize(model,contentImage, styleImage, contentLayerNames, styleLayerNames, image_size = None, iniMethod = "random"):
+	# model: choose from "InceptionV1","InceptionV3","InceptionV4"
+	# contentImage, styleImage: images
+	# contentLayerNames: which layers are used to construct the content representation
+	# styleLayerNames: which layers are used to construct the style representation
 
 	tf.reset_default_graph()
-	inputImage = tf.Variable(styleImage, name="W",dtype = tf.float32)
-
-	graph_def = tf.GraphDef()
-	with gfile.FastGFile("./plainModel/tensorflow_inception_graph.pb",'rb') as f:
+	with gfile.FastGFile("./plainModel/%s.pb" %(model,),'rb') as f:
+			graph_def = tf.GraphDef()
 			graph_def.ParseFromString(f.read())
-			tf.import_graph_def(graph_def, input_map={"Mul:0": inputImage})
-	
-
-	# endPoints ={
-	#   	"mixed_10":"mixed_10/join:0",
-	#   	"mixed_8":"mixed_8/join:0",
-	#   	"mixed_7":"mixed_7/join:0",
-	#   	"mixed_6":"mixed_6/join:0",
-	#   	"mixed_5":"mixed_5/join:0",
-	#   	"mixed_4":"mixed_4/join:0",
-	#   	"mixed_3":"mixed_3/join:0",
-	#   	"mixed_2":"mixed_2/join:0",
-	#   	"mixed_1":"mixed_1/join:0",
-	#   	"mixed":"mixed/join:0"}
-	# print [n.name for n in tf.get_default_graph().as_graph_def().node]
- 	
-	contentTensor = getFeatureTensors(["import/"+k for k in contentLayerNames], "content")
-	
-	# print "mean_pix": mean_pix
-	# print "contentImage:",contentImage
-	# print "styleImage:", styleImage
-
-
-	#evalRes = sess.run(fullLayerNames, {inputImage:contentImage})
-	#shapes = [i.shape for i in evalRes]
-	#size = dict(zip(fullLayerNames,shapes))
-	size = None
-	styleTensor = getFeatureTensors(["import/"+k for k in styleLayerNames], "style",size)
-	
-	# print endPoints.keys()
+			tf.import_graph_def(graph_def, name='')
 
 	with tf.Session() as sess:
-		writer = tf.train.SummaryWriter("log_tb",sess.graph)
+		if model == "InceptionV3":
+			inputImage = tf.get_default_graph().get_tensor_by_name("ResizeBilinear:0")
+		else:
+			inputImage = tf.get_default_graph().get_tensor_by_name("InputImage:0")
+		if image_size is None:
+			image_size = contentImage.shape
+		# image_size = (224,224,3)
+		contentImage = scipy.misc.imresize(contentImage, image_size).astype(np.float)
+		styleImage = scipy.misc.imresize(styleImage, image_size).astype(np.float)
+
+		# mean_pix = np.mean(contentImage,axis = (0,1)) # normalize by the mean values
+		mean_pix = np.array([ 104.00698793,  116.66876762,  122.67891434]) # normalized from XXX
+		# print mean_pix
+
+		contentImage = contentImage - mean_pix
+		styleImage = styleImage - mean_pix
+		contentImage = np.expand_dims(contentImage, axis = 0).astype(np.float)
+		styleImage = np.expand_dims(styleImage, axis = 0).astype(np.float)
+
+		# for variable in tf.all_variables():
+			# print variable
+		# print [n.name for n in tf.get_default_graph().as_graph_def().node]. # print all the tensors
+
+		# print inputImage
+		contentTensor = getFeatureTensors(contentLayerNames, "content")
+
+		 # calculate the size of style representations
+		fullLayerNames = styleLayerNames
+		evalRes = sess.run(fullLayerNames, {inputImage:contentImage})
+		shapes = [i.shape for i in evalRes]
+		size = dict(zip(fullLayerNames,shapes))
+		print size
+
+		styleTensor = getFeatureTensors(styleLayerNames,"style",size)
+		
 		contentTarget = sess.run(contentTensor, {inputImage:contentImage})
 		styleTarget = sess.run(styleTensor, {inputImage:styleImage})
-		# print "hello",sess.run("import/Mul/y:0")
+
 	# construct loss
 	# print contentTarget
-	
 	tf.reset_default_graph()
-
 	graph_def = tf.GraphDef()
-	inputImage = tf.get_variable(name = "inputImage", shape = (1,image_size[0], image_size[1],3), initializer = tf.random_normal_initializer(mean=0.0, stddev=100, dtype=tf.float32))
-	# inputImage = tf.Variable(contentImage, name="W")
-	with gfile.FastGFile("./plainModel/tensorflow_inception_graph.pb",'rb') as f:
-			graph_def.ParseFromString(f.read())
-			tf.import_graph_def(graph_def, input_map={"Mul:0": inputImage})
-
-	contentLoss = 0.0
-	styleLoss = 0.0	
-	contentTensor = getFeatureTensors(["import/"+k for k in contentLayerNames], "content")
-
-	# size = dict(zip(["import/"+endPoints[k] for k in endPoints.keys() if k in styleLayerNames],shapes))
-	size = None
-	styleTensor = getFeatureTensors(["import/"+k for k in styleLayerNames], "style",size)
 	
-	contentLayerWeights = 1.0/len(contentLayerNames)
-	print "contentLayers:",contentTarget.keys()
+	if iniMethod == "random":
+		inputImage = tf.get_variable(name = "inputImage", shape = (1,image_size[0], image_size[1],3), \
+					initializer = tf.random_normal_initializer(mean=0.0, stddev=10, dtype=tf.float32))
+	elif iniMethod == "content":
+		inputImage = tf.Variable(contentImage.astype(np.float32),name = "inputImage")
+	elif iniMethod == "style":
+		inputImage = tf.Variable(styleImage.astype(np.float32),name = "inputImage")
 
-	for key in contentTarget.keys():
-		contentLoss += contentLayerWeights*tf.nn.l2_loss(contentTensor[key] - contentTarget[key])
-		# print contentTensor["import/"+key], contentTarget[key].shape
-	styleLayerWeights = 1.0/len(styleLayerNames)
-	
-	print "styleLayers:",styleTarget.keys()
-	
-	for key in styleTarget.keys():
-		styleLoss += styleLayerWeights*tf.nn.l2_loss(styleTensor[key] - styleTarget[key])
-		# print styleTensor["import/"+key], styleTarget[key].shape
-	styleLoss = 1e3*styleLoss
-	
-	loss = styleLoss + contentLoss # styleLoss
-
-	# tv_y_size = image_size[0]
-	# tv_x_size = image_size[1]
-	# tv_loss = 0.1 * 2 * ((tf.nn.l2_loss(inputImage[:,1:,:,:] - inputImage[:,:image_size[0]-1,:,:]) /tv_y_size) +(tf.nn.l2_loss(inputImage[:,:,1:,:] - inputImage[:,:,:image_size[1]-1,:]) /tv_x_size))
-
-
-	train_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+	with gfile.FastGFile("./plainModel/%s.pb" %(model,),'rb') as f:
+		graph_def.ParseFromString(f.read())
+			# tf.import_graph_def(graph_def, name='')
+		# replace the InputImage part by a trainable variable
+		if model == "InceptionV3":
+			tf.import_graph_def(graph_def, input_map={"ResizeBilinear:0": inputImage})
+		else:
+			tf.import_graph_def(graph_def,input_map={"InputImage:0": inputImage}) 
 
 	with tf.Session() as sess:
+		# image_size = (224,224)
+		sess.run(tf.initialize_variables([inputImage]))
+		
+		writer = tf.train.SummaryWriter("log_tb",sess.graph)
+		contentLoss = 0.0
+		styleLoss = 0.0	
+		contentTensor = getFeatureTensors(["import/"+k for k in contentLayerNames], "content")
+
+		size = dict(zip(["import/"+k for k in styleLayerNames],shapes))
+
+		styleTensor = getFeatureTensors(["import/"+k for k in styleLayerNames], "style",size)
+
+		for key in contentTarget.keys():
+			contentLoss += 0.5*tf.nn.l2_loss(contentTensor["import/"+key] - contentTarget[key])
+
+		styleLayerWeights = 1.0/len(styleLayerNames)
+
+		for key in styleTarget.keys():
+			styleLoss += 0.25*styleLayerWeights*tf.nn.l2_loss(styleTensor["import/"+key] - styleTarget[key])
+
+		loss = contentLoss+1000.0*styleLoss
+		# print loss
+		train_op = tf.train.AdamOptimizer(learning_rate=10).minimize(loss, var_list = [inputImage])
 		sess.run(tf.initialize_all_variables())	
 		print "created graph"
-		
-		print sess.run([loss,contentLoss, styleLoss])
-
-		for i in range(601):
+		for i in range(1000):
+			print i
 			sess.run(train_op)
-			# print sess.run([loss,styleLoss*500, contentLoss])
 			
-			if i%100 == 0:
-				print i
-				print sess.run([loss,contentLoss, styleLoss])
-				newImage = sess.run(inputImage)
-				newImage[0,:,:,:] = newImage[0,:,:,:]*std_pix
-				newImage[0,:,:,:] +=mean_pix
-				scipy.misc.imsave("./results/inceptionM_results_test_%d.jpg" %(i,), np.clip(newImage[0,:,:,:], 0, 255).astype(np.uint8))
-			# print sess.run(contentTensor)
 		newImage = sess.run(inputImage)
-		newImage[0,:,:,:] = newImage[0,:,:,:]*std_pix
 		newImage[0,:,:,:] +=mean_pix
 		return newImage
 
+
 if __name__ == '__main__':
-	import json,sys
-	learning_rate = sys.argv[1]
-	with open('./config/inception_config.json') as data_file:    
-		layerConfig = json.load(data_file)
 
-	if True:
-		k = "config_1"
-	# for k in layerConfig.keys():
-		v = layerConfig[k]
-		print k
-		contentLayerNames = v["contentLayerNames"] #['mixed_3/join:0']
-		styleLayerNames = v["styleLayerNames"] #['mixed_1/join:0','mixed_1/join:0','mixed_1/join:0','mixed_1/join:0']
+	layerDict = {
 
-		for i in range(3,4):
+	# InceptionV1 model have no restriction on the image size of 224
+	# downloaded from https://github.com/beniz/deepdetect/issues/89
+	"InceptionV1":{\
+	"content":['InceptionV1/InceptionV1/MaxPool_3a_3x3/MaxPool:0'],
+	"style":['InceptionV1/InceptionV1/Conv2d_1a_7x7/Relu:0',\
+	'InceptionV1/InceptionV1/Conv2d_2c_3x3/Relu:0',\
+	'InceptionV1/InceptionV1/MaxPool_3a_3x3/MaxPool:0',\
+	"InceptionV1/InceptionV1/MaxPool_4a_3x3/MaxPool:0",\
+	"InceptionV1/InceptionV1/MaxPool_5a_2x2/MaxPool:0"],
+	"size":[224,224,3]},
+
+	# InceptionV4 model have no restriction on the image size
+	# Downloaded from https://github.com/beniz/deepdetect/issues/89
+	"InceptionV4":{\
+	"content":['InceptionV4/InceptionV4/Mixed_5a/concat:0'],
+	"style":['InceptionV4/InceptionV4/Conv2d_1a_3x3/Relu:0',\
+	'InceptionV4/InceptionV4/Conv2d_2a_3x3/Relu:0',\
+	'InceptionV4/InceptionV4/Conv2d_2b_3x3/Relu:0'],
+	"size":[299,299,3]},
+
+	# InceptionV3 model is from http://download.tensorflow.org/models/image/imagenet/inception-2015-12-05.tgz
+	# InceptionV3 model have restrictions on the image size of 299
+	"InceptionV3":{
+	"content":["mixed_4/join:0"],
+	"style":["conv:0","pool:0","conv_4:0","pool_1:0"],
+	"size":[299,299,3]}
+	}
+
+	for model in ["InceptionV1","InceptionV4","InceptionV3"]:
+		for i in range(1,2):	
 			for j in range(1,2):
-				contentImage = scipy.misc.imread("./Examples/content_%d.jpg" %(i,)).astype(np.float32)
-				styleImage = scipy.misc.imread("./Examples/style_%d.jpg" %(j,)).astype(np.float32)
-			
-				resultImage = stylize(contentImage, styleImage, contentLayerNames, styleLayerNames,float(learning_rate))
-				resultImage = resultImage[0,:,:,:]
-				img = np.clip(resultImage, 0, 255).astype(np.uint8)
-				scipy.misc.imsave("./results/inception_results_%s_content_%d_style_%d_rl_%s.jpg" %(k,i,j,learning_rate), img)
+				for iniMethod in ["content","random","style"]:
+					contentImage = scipy.misc.imread("./Examples/content_%d.jpg" %(i,)).astype(np.float)
+					styleImage = scipy.misc.imread("./Examples/style_%d.jpg" %(j,)).astype(np.float)
+		
+					contentLayerNames = layerDict[model]["content"]
+					styleLayerNames = layerDict[model]["style"]
+					imageSize = layerDict[model]["size"]
+
+					resultImage = stylize(model,contentImage, styleImage, contentLayerNames, styleLayerNames, imageSize,iniMethod)
+					resultImage = resultImage[0,:,:,:]
+					img = np.clip(resultImage, 0, 255).astype(np.uint8)
+					scipy.misc.imsave("./%s_c_%d_s_%d_ini_%s.jpg" %(model,i,j,iniMethod), img)
