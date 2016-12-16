@@ -65,8 +65,8 @@ def getFeatures(graph, layerNames = ["conv1_1"], featureType = "content", return
 
 def stylize(contentImage, styleImage, contentLayerNames = ['conv4_2'], styleLayerNames = ['conv1_1', 'conv2_1', 'conv3_1', 'conv4_1', 'conv5_1']):
 
-	# imageShape = contentImage.shape
-	imageShape = (224,224,3)
+	imageShape = contentImage.shape
+	# imageShape = (224,224,3)
 	contentImage = scipy.misc.imresize(contentImage, imageShape)
 	styleImage = scipy.misc.imresize(styleImage, imageShape)
 
@@ -77,7 +77,7 @@ def stylize(contentImage, styleImage, contentLayerNames = ['conv4_2'], styleLaye
 	g = tf.Graph()
 	with g.as_default():
 		image = tf.placeholder('float', shape=(None,imageShape[0],imageShape[1],imageShape[2]),name = "inputImage")
-		net, mean_pixel = vgg.net("./models/imagenet-vgg-verydeep-19.mat", image) # input as placeholder
+		net, mean_pixel = vgg.net("./plainModel/imagenet-vgg-verydeep-19.mat", image) # input as placeholder
 		print mean_pixel
 		contentImage = contentImage- mean_pixel
 		styleImage = styleImage - mean_pixel
@@ -100,23 +100,23 @@ def stylize(contentImage, styleImage, contentLayerNames = ['conv4_2'], styleLaye
 	# get a new graph
 	g = tf.Graph()
 	with g.as_default():
-		writer = tf.train.SummaryWriter("log_tb",sess.graph)
+		# writer = tf.train.SummaryWriter("log_tb",sess.graph)
 		# image = tf.get_variable("initialImage", shape = (1,)+imageShape,initializer = initializer,dtype = tf.float32)
 		image = tf.Variable(contentImage.astype(np.float32),name = "initialImage")
 		# reconstruct the tensorflow graph with input as variable
-		net, _ = vgg.net("./models/imagenet-vgg-verydeep-19.mat", image)
+		net, _ = vgg.net("./plainModel/imagenet-vgg-verydeep-19.mat", image)
 
 		contentLoss = 0.0
 		styleLoss = 0.0
 
 		for layerName in contentLayerNames:
 			contentTensor = getFeatures(g, layerNames = [layerName], featureType = "content", returnTensor=True)
-			contentLoss = contentLoss + tf.nn.l2_loss(contentFeatures[layerName] - contentTensor[layerName])
+			contentLoss = contentLoss + 0.2*tf.nn.l2_loss(contentFeatures[layerName] - contentTensor[layerName])
 			
 		styleLayerWeights = 1.0/len(styleLayerNames)
 		for layerName in styleLayerNames:
 			styleTensor = getFeatures(g, layerNames = [layerName], featureType = "style", returnTensor=True)
-			styleLoss = styleLoss + styleLayerWeights*tf.nn.l2_loss(styleFeatures[layerName] - styleTensor[layerName])
+			styleLoss = styleLoss + 0.25*styleLayerWeights*tf.nn.l2_loss(styleFeatures[layerName] - styleTensor[layerName])
 
 
 		if contentLossExist:
@@ -146,7 +146,7 @@ def stylize(contentImage, styleImage, contentLayerNames = ['conv4_2'], styleLaye
 					print newImage.sum(),l
 					newImage[0,:,:,:] = newImage[0,:,:,:]
 					newImage[0,:,:,:] +=mean_pixel
-					scipy.misc.imsave("./results/vgg2_results_test_%d.jpg" %(i,), np.clip(newImage[0,:,:,:], 0, 255).astype(np.uint8))
+					scipy.misc.imsave("./vgg2_results_test_%d.jpg" %(i,), np.clip(newImage[0,:,:,:], 0, 255).astype(np.uint8))
 
 			print time.time() -start
 			# resultImage = sess.run("initialImage:0")
@@ -171,6 +171,6 @@ if __name__ == '__main__':
 				
 			historyImage, historyLoss = stylize(contentImage, styleImage, contentLayerNames = contentLayerNames, styleLayerNames = styleLayerNames)
 			for k,img in enumerate(historyImage):
-				scipy.misc.imsave("./results/vgg_noCL_content_%d_style_%d_seq_%d.jpg" %(i,j,k), img[0,:,:,:])
+				scipy.misc.imsave("./vgg_noCL_content_%d_style_%d_seq_%d.jpg" %(i,j,k), img[0,:,:,:])
 
-			pickle.dump(historyLoss, open("./results/lossHistory_noCL_content_%d_style_%d.p" %(i,j),"wb"))
+			pickle.dump(historyLoss, open("./lossHistory_noCL_content_%d_style_%d.p" %(i,j),"wb"))
